@@ -15,6 +15,7 @@
   [verify-deterministic-start (->*
                                ((-> (and/c yosys-module? dynamically-addressable?))
                                 #:invariant (-> (and/c yosys-module? dynamically-addressable?) any)
+                                #:raw-invariant (listof (or/c pair? (cons/c pair? wire-constant?)))
                                 #:step (-> (and/c yosys-module? dynamically-addressable?) (and/c yosys-module? dynamically-addressable?))
                                 #:reset symbol?
                                 #:reset-active (or/c 'low 'high)
@@ -116,6 +117,7 @@
 (define (verify-deterministic-start
          symbolic-constructor
          #:invariant invariant
+         #:raw-invariant raw-invariant
          #:step step
          #:reset reset
          #:reset-active reset-active
@@ -127,7 +129,19 @@
          #:try-verify-after [try-verify-after 0]
          #:limit [limit #f]
          #:debug [debug (lambda _ #f)])
-  (define s0-with-inv (with-invariants (symbolic-constructor) invariant))
+
+; in the original verification pipeline the rom invariants are "loaded" into the state using the concretization flow
+; for our purposes that smt solver invocation is unneccesarily costly, given that the invariants are already exactly known
+; so instead we just load the values directly into the state
+;
+; (define s0-with-inv (with-invariants (symbolic-constructor) invariant))
+  (define s0 (symbolic-constructor))
+  (map (lambda (rinv)
+        (let ([n (first (car rinv))] [idx (second (car rinv))] [v (cdr rinv)])
+          (vector-set! (get-field s0 n) idx v)))
+       raw-invariant)
+  (define s0-with-inv s0)
+
   (define statics (or (hints 'statics) '()))
   (unless (verify-statics s0-with-inv step statics)
     (error 'verify-deterministic-start "failed to prove statics"))
